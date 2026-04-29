@@ -3002,6 +3002,7 @@ const worldMaps = {
       if (msg.type === 'sync') {
         handlePlayerState(msg.players || []);
         applyGoblinState(msg.goblins || []);
+        if (msg.boss) applyBossState(msg.boss);
       } else if (msg.type === 'state') {
         handlePlayerState(msg.players || []);
       } else if (msg.type === 'worldSnapshot') {
@@ -3018,6 +3019,10 @@ const worldMaps = {
         if (msg.id !== MP.id) applyRemoteTreeRespawned(msg.treeId);
       } else if (msg.type === 'goblinHit') {
         applyRemoteGoblinHit(msg.goblinId, msg.hp, msg.alive, msg.id, msg.damage || 0);
+      } else if (msg.type === 'bossHit') {
+        applyBossHit(msg);
+      } else if (msg.type === 'bossState') {
+        applyBossState(msg.boss || msg);
       } else if (msg.type === 'goblinRespawned') {
         applyRemoteGoblinRespawned(msg.goblinId);
       } else if (msg.type === 'goblinState') {
@@ -3466,7 +3471,7 @@ function addLights() {
 
       if (inDungeon && targetBoss?.userData?.alive) {
         const d = distance2D(player, targetBoss);
-        if (d > 6.1) {
+        if (d > 7.2) {
           showNotice('Move closer to attack the dark beast.');
           return;
         }
@@ -3501,6 +3506,16 @@ function addLights() {
 
     function damageBoss(damage) {
       if (!dungeonBoss?.userData?.alive) return;
+      // Multiplayer boss HP is server-owned so both players see the same health.
+      if (MP.connected) {
+        sendWorldEvent({ type: 'bossHit', bossId: 'dark_beast', damage });
+        weaponDrawn = true;
+        dungeonBoss.userData.hurtFlash = .2;
+        spawnBossHitSpark(dungeonBoss.position.x, dungeonBoss.position.z);
+        showNotice(`You swing at the dark beast for ${damage}.`);
+        return;
+      }
+
       const data = dungeonBoss.userData;
       data.damageByPlayer[MP.id] = (data.damageByPlayer[MP.id] || 0) + damage;
       data.hp = Math.max(0, data.hp - damage);
@@ -3533,6 +3548,52 @@ function addLights() {
         addChatMessage({ system: true, text: `Dark beast will respawn in ${data.respawnSeconds} seconds.` });
         targetBoss = null;
       }
+    }
+
+    function applyBossHit(state = {}) {
+      if (!dungeonBoss) return;
+      const data = dungeonBoss.userData;
+      const wasAlive = data.alive;
+      data.hp = Math.max(0, Number(state.hp ?? data.hp));
+      data.maxHp = Number(state.maxHp ?? data.maxHp ?? 260);
+      data.alive = !!state.alive;
+      data.respawnAt = Number(state.respawnIn ?? data.respawnAt ?? 0);
+      data.hurtFlash = .25;
+      dungeonBoss.visible = data.alive;
+      spawnBossHitSpark(dungeonBoss.position.x, dungeonBoss.position.z);
+
+      if (state.id === MP.id && Number(state.damage || 0) > 0) {
+        addSkillXp('melee', Math.max(5, Math.floor(Number(state.damage) * 5)), 'from fighting the dark beast.');
+        addChatMessage({ system: true, text: `You hit the dark beast for ${state.damage}.` });
+      }
+
+      if (wasAlive && !data.alive) {
+        targetBoss = null;
+        if (state.id === MP.id || Number(state.myDamage || 0) > 0) {
+          const coins = Number(state.coins || 0);
+          const hides = Number(state.hides || 0);
+          if (coins > 0) inventory.coins += coins;
+          if (hides > 0) inventory.darkHide += hides;
+          addSkillXp('melee', Number(state.xp || 0) || 180, 'from defeating the dark beast.');
+          updateInventoryUI();
+          showNotice(`Dark beast defeated! +${formatCoins(coins)} coins, +${hides} hide${hides === 1 ? '' : 's'}.`);
+          addChatMessage({ system: true, text: `The dark beast collapses. You receive ${coins.toLocaleString()} coins and ${hides} dark beast hide${hides === 1 ? '' : 's'}.` });
+        } else {
+          addChatMessage({ system: true, text: 'Another player defeated the dark beast.' });
+        }
+      }
+    }
+
+    function applyBossState(state = {}) {
+      if (!dungeonBoss || !state) return;
+      const data = dungeonBoss.userData;
+      data.hp = Math.max(0, Number(state.hp ?? data.hp));
+      data.maxHp = Number(state.maxHp ?? data.maxHp ?? 260);
+      data.alive = !!state.alive;
+      data.respawnAt = Number(state.respawnIn ?? data.respawnAt ?? 0);
+      dungeonBoss.visible = data.alive;
+      if (typeof state.x === 'number') dungeonBoss.position.x = THREE.MathUtils.lerp(dungeonBoss.position.x, state.x, .35);
+      if (typeof state.z === 'number') dungeonBoss.position.z = THREE.MathUtils.lerp(dungeonBoss.position.z, state.z, .35);
     }
 
     function spawnBossHitSpark(x, z) {
@@ -5033,9 +5094,9 @@ function addLights() {
       dungeonBoss.rotation.y = Math.PI + Math.sin(data.phase * .28) * .18;
       if (data.head) data.head.rotation.x = Math.sin(data.phase * .9) * .08;
       const distToPlayer = Math.hypot(player.position.x - dungeonBoss.position.x, player.position.z - dungeonBoss.position.z);
-      const attack = distToPlayer < 8 ? Math.max(0, Math.sin(data.phase * 3.2)) : 0;
-      if (distToPlayer <= 6.2) targetBoss = dungeonBoss;
-      if (distToPlayer < 15) {
+      const attack = distToPlayer < 12 ? Math.max(0, Math.sin(data.phase * 3.2)) : 0;
+      if (distToPlayer <= 7.4) targetBoss = dungeonBoss;
+      if (distToPlayer < 26) {
         const dx = player.position.x - dungeonBoss.position.x;
         const dz = player.position.z - dungeonBoss.position.z;
         dungeonBoss.rotation.y = Math.atan2(dx, dz) + Math.PI;
@@ -5046,7 +5107,7 @@ function addLights() {
       if (data.legBR) data.legBR.rotation.x = idle * .13;
       dungeonBoss.scale.setScalar(1.25 + attack * .035 + (data.hurtFlash > 0 ? Math.sin(data.hurtFlash * 80) * .035 : 0));
 
-      if (distToPlayer < 6.4 && data.attackCooldown <= 0) {
+      if (distToPlayer < 7.6 && data.attackCooldown <= 0) {
         data.attackCooldown = 1.75;
         const hit = 8 + Math.floor(Math.random() * 8);
         playerHP = Math.max(0, playerHP - hit);

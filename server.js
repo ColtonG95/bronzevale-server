@@ -12,6 +12,17 @@ const lastActionAt = new Map();
 const world = {
   choppedTrees: new Set(),
   doors: {},
+  boss: {
+    id: 'dark_beast',
+    x: 0,
+    z: 73,
+    hp: 260,
+    maxHp: 260,
+    alive: true,
+    respawnAt: 0,
+    respawnMs: 90000,
+    damageByPlayer: {},
+  },
   goblins: {
     goblin_0: { id: 'goblin_0', x: 42, z: 31, homeX: 42, homeZ: 31, hp: 35, maxHp: 35, alive: true, respawnAt: 0, wander: Math.random() * Math.PI * 2 },
     goblin_1: { id: 'goblin_1', x: 50, z: 38, homeX: 50, homeZ: 38, hp: 35, maxHp: 35, alive: true, respawnAt: 0, wander: Math.random() * Math.PI * 2 },
@@ -243,10 +254,11 @@ wss.on('connection', ws => {
   send(ws, {
     type: 'worldSnapshot',
     world: {
-      choppedTrees: Array.from(world.choppedTrees),
-      doors: world.doors,
-      goblins: world.goblins,
-    },
+  choppedTrees: Array.from(world.choppedTrees),
+  doors: world.doors,
+  goblins: world.goblins,
+  boss: world.boss,
+},
   });
 
   ws.on('message', message => {
@@ -275,6 +287,71 @@ wss.on('connection', ws => {
 
       return;
     }
+	
+	if (data.type === 'bossHit') {
+  const actorId = String(data.id || playerId || 'unknown');
+  if (!allowed(actorId, 'bossHit:dark_beast', 450)) return;
+
+  const player = players.get(actorId);
+  const boss = world.boss;
+
+  if (!player || player.scene !== 'dungeon' || !boss.alive) return;
+
+  const distanceToBoss = dist(player.x, player.z, boss.x, boss.z);
+  if (distanceToBoss > 8.2) return;
+
+  const damage = Math.max(1, Math.min(28, Number(data.damage) || 1));
+  boss.hp = Math.max(0, boss.hp - damage);
+  boss.damageByPlayer[actorId] = (boss.damageByPlayer[actorId] || 0) + damage;
+
+  const payload = {
+    type: 'bossHit',
+    id: actorId,
+    bossId: boss.id,
+    hp: boss.hp,
+    maxHp: boss.maxHp,
+    alive: boss.alive,
+    damage,
+    x: boss.x,
+    z: boss.z,
+  };
+
+  if (boss.hp <= 0) {
+    boss.alive = false;
+    boss.respawnAt = Date.now() + boss.respawnMs;
+
+    const totalDamage = Math.max(
+      1,
+      Object.values(boss.damageByPlayer).reduce((sum, val) => sum + val, 0)
+    );
+
+    for (const client of wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+
+      const clientId = client.playerId;
+      const myDamage = boss.damageByPlayer[clientId] || 0;
+      const share = Math.max(0, Math.min(1, myDamage / totalDamage));
+
+      const baseCoins = 100 + Math.floor(Math.random() * 901);
+      const baseHides = 1 + Math.floor(Math.random() * 3);
+
+      send(client, {
+        ...payload,
+        alive: false,
+        myDamage,
+        coins: myDamage > 0 ? Math.max(25, Math.round(baseCoins * share)) : 0,
+        hides: myDamage > 0 ? Math.max(1, Math.min(3, Math.ceil(baseHides * share))) : 0,
+        xp: myDamage > 0 ? Math.round(180 * share) : 0,
+        respawnIn: Math.ceil(boss.respawnMs / 1000),
+      });
+    }
+
+    return;
+  }
+
+  broadcast(payload);
+  return;
+}
 
     if (data.type === 'move') {
       playerId = String(data.id || playerId || Math.random().toString(36).slice(2));
@@ -433,6 +510,17 @@ setInterval(() => {
   lastTick = t;
 
   updateGoblins(dt);
+  
+  if (!world.boss.alive && world.boss.respawnAt && Date.now() >= world.boss.respawnAt) {
+  world.boss.hp = world.boss.maxHp;
+  world.boss.alive = true;
+  world.boss.respawnAt = 0;
+  world.boss.damageByPlayer = {};
+  broadcast({
+    type: 'bossState',
+    boss: world.boss,
+  });
+}
 
   const staleCutoff = Date.now() - 15000;
   for (const [id, player] of players.entries()) {
@@ -445,6 +533,7 @@ setInterval(() => {
       });
     }
   }
+
 
   broadcast({
     type: 'sync',
@@ -465,9 +554,19 @@ setInterval(() => {
       hp: g.hp,
       alive: g.alive,
     })),
+    boss: {
+      id: world.boss.id,
+      x: world.boss.x,
+      z: world.boss.z,
+      hp: world.boss.hp,
+      maxHp: world.boss.maxHp,
+      alive: world.boss.alive,
+      respawnIn: world.boss.alive
+        ? 0
+        : Math.max(0, Math.ceil((world.boss.respawnAt - Date.now()) / 1000)),
+    },
   });
 }, 100);
-
 server.listen(PORT, HOST, () => {
   console.log(`Game + WebSocket server running on port ${PORT}`);
 });
