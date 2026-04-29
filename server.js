@@ -104,12 +104,13 @@ function tryMoveGoblin(goblin, dx, dz) {
 
 function canGoblinSeePlayer(goblin, player) {
   if (!goblin || !player) return false;
+  if (player.scene === 'dungeon') return false;
   if (dist(goblin.x, goblin.z, player.x, player.z) > 9) return false;
   return !lineBlockedByBuilding(goblin.x, goblin.z, player.x, player.z);
 }
 
 function updateGoblins(dt) {
-  const playerList = Array.from(players.values());
+  const playerList = Array.from(players.values()).filter(p => p.scene !== 'dungeon');
 
   for (const goblin of Object.values(world.goblins)) {
     if (!goblin.alive) {
@@ -285,8 +286,10 @@ wss.on('connection', ws => {
       players.set(playerId, {
         id: playerId,
         x: Number(data.x) || 0,
+        y: Number(data.y) || 0,
         z: Number(data.z) || 0,
         rot: Number(data.rot) || 0,
+        scene: data.scene === 'dungeon' ? 'dungeon' : 'overworld',
         action: String(data.action || 'idle').slice(0, 20),
         name: playerName,
         lastSeen: Date.now(),
@@ -362,7 +365,7 @@ wss.on('connection', ws => {
       const player = players.get(actorId);
       const goblin = world.goblins[data.goblinId];
 
-      if (!player || !goblin || !goblin.alive) return;
+      if (!player || player.scene === 'dungeon' || !goblin || !goblin.alive) return;
 
       const distanceToGoblin = dist(player.x, player.z, goblin.x, goblin.z);
       if (distanceToGoblin > 4.3) return;
@@ -448,8 +451,10 @@ setInterval(() => {
     players: Array.from(players.values()).map(p => ({
       id: p.id,
       x: p.x,
+      y: p.y,
       z: p.z,
       rot: p.rot,
+      scene: p.scene,
       action: p.action,
       name: p.name,
     })),

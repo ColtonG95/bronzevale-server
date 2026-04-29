@@ -3056,13 +3056,19 @@ function handlePlayerState(players) {
     const nextX = typeof p.x === 'number' ? p.x : 0;
     const nextZ = typeof p.z === 'number' ? p.z : -2;
     const nextRot = typeof p.rot === 'number' ? p.rot : 0;
+    const nextScene = p.scene === 'dungeon' ? 'dungeon' : 'overworld';
+    const localScene = inDungeon ? 'dungeon' : 'overworld';
 
     // Snapshot interpolation: keep a previous and next state so bad ping doesn't look like 2 FPS snapping.
     m.userData.prevX = typeof m.userData.targetX === 'number' ? m.userData.targetX : m.position.x;
     m.userData.prevZ = typeof m.userData.targetZ === 'number' ? m.userData.targetZ : m.position.z;
     m.userData.prevRot = typeof m.userData.targetRot === 'number' ? m.userData.targetRot : m.rotation.y;
+    m.userData.scene = nextScene;
+    m.visible = nextScene === localScene;
+    if (m.userData.nameLabel) m.userData.nameLabel.style.display = m.visible ? '' : 'none';
     m.userData.targetX = nextX;
     m.userData.targetZ = nextZ;
+    m.userData.targetY = nextScene === 'dungeon' ? DUNGEON_Y : terrainHeightAt(nextX, nextZ);
     m.userData.targetRot = nextRot;
     m.userData.snapshotStart = now;
     m.userData.snapshotEnd = now + 220;
@@ -3096,12 +3102,25 @@ function makeRemotePlayer(id, name = 'Adventurer') {
   const remote = new THREE.Group();
   remote.scale.set(.92, .92, .92);
 
-  // Remote players use the lightweight built-in rig for now.
-  // Cloning the full GLB + mesh/shadow setup per remote player can tank FPS on weaker clients.
-  const visual = makeHumanoid();
-  remote.add(visual);
-  remote.userData.modelVisual = visual;
-  remote.userData.parts = visual.userData.parts;
+  if (usingGLBPlayer && playerVisual) {
+    const visual = playerVisual.clone(true);
+    visual.name = 'RemoteGLBPlayerVisual';
+    visual.traverse(obj => {
+      if (obj.isMesh) {
+        obj.castShadow = !LOW_GRAPHICS;
+        obj.receiveShadow = !LOW_GRAPHICS;
+      }
+    });
+    remote.add(visual);
+    remote.userData.modelVisual = visual;
+    remote.userData.glbRig = collectNamedRigParts(visual);
+    remote.userData.parts = {};
+  } else {
+    const visual = makeHumanoid();
+    remote.add(visual);
+    remote.userData.modelVisual = visual;
+    remote.userData.parts = visual.userData.parts;
+  }
   remote.userData.remoteId = id;
   remote.userData.name = name;
   remote.userData.lastSeen = performance.now();
@@ -3146,6 +3165,8 @@ function sendPlayerState(dt, force = false) {
     id: MP.id,
     x: player.position.x,
     z: player.position.z,
+    y: player.position.y,
+    scene: inDungeon ? 'dungeon' : 'overworld',
     rot: player.rotation.y,
     action: chopAction ? 'chop' : fishingAction ? 'fish' : attackCooldown > 0 ? 'attack' : 'idle',
     name: MP.name
@@ -4262,6 +4283,10 @@ function addLights() {
     function updateNameLabels() {
       // no local name label
       for (const remote of MP.players.values()) {
+        if (remote.userData.scene !== (inDungeon ? 'dungeon' : 'overworld')) {
+          if (remote.userData.nameLabel) remote.userData.nameLabel.style.display = 'none';
+          continue;
+        }
         positionNameLabel(remote.userData.nameLabel, remote, 4.45);
       }
     }
@@ -4279,6 +4304,7 @@ function addLights() {
           const pr = typeof remote.userData.prevRot === 'number' ? remote.userData.prevRot : remote.rotation.y;
           remote.position.x = THREE.MathUtils.lerp(px, remote.userData.targetX, eased);
           remote.position.z = THREE.MathUtils.lerp(pz, remote.userData.targetZ, eased);
+          remote.position.y = remote.userData.scene === 'dungeon' ? DUNGEON_Y : terrainHeightAt(remote.position.x, remote.position.z);
           remote.rotation.y = THREE.MathUtils.lerp(pr, remote.userData.targetRot || 0, eased);
         }
 
@@ -4692,6 +4718,12 @@ function addLights() {
         ctx.beginPath(); ctx.arc(mx(dungeonBoss.position.x), mz(dungeonBoss.position.z), full ? 6 : 4, 0, Math.PI * 2); ctx.fill();
       }
 
+      ctx.fillStyle = '#4aa3ff';
+      for (const remote of MP.players.values()) {
+        if (remote.userData.scene !== 'dungeon') continue;
+        ctx.beginPath(); ctx.arc(mx(remote.position.x), mz(remote.position.z), full ? 4.5 : 3.4, 0, Math.PI * 2); ctx.fill();
+      }
+
       ctx.fillStyle = '#ffffff';
       ctx.beginPath(); ctx.arc(mx(player.position.x), mz(player.position.z), full ? 5 : 4, 0, Math.PI * 2); ctx.fill();
 
@@ -4790,6 +4822,7 @@ function addLights() {
 
       ctx.fillStyle = '#4aa3ff';
       for (const remote of MP.players.values()) {
+        if (remote.userData.scene !== (inDungeon ? 'dungeon' : 'overworld')) continue;
         ctx.beginPath(); ctx.arc(mx(remote.position.x), mz(remote.position.z), full ? 4.5 : 3.4, 0, Math.PI * 2); ctx.fill();
       }
 
