@@ -977,6 +977,7 @@
 
       <div class="panel mpPanel">
         <div class="statline"><span id="mpStatus">Connecting...</span></div>
+        <div class="statline"><span id="fpsStatus">FPS: --</span></div>
       </div>
 
       <div class="panel inventory">
@@ -1120,14 +1121,15 @@
 
     const canvas = document.getElementById('game');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
-    renderer.shadowMap.enabled = true;
+    const LOW_GRAPHICS = localStorage.getItem('bronzevaleLowGraphics') === '1';
+    renderer.setPixelRatio(LOW_GRAPHICS ? 1 : Math.min(devicePixelRatio, 1.5));
+    renderer.shadowMap.enabled = !LOW_GRAPHICS;
     const PERFORMANCE_MODE = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x9ed0ff);
-    scene.fog = new THREE.Fog(0x9ed0ff, 28, 85);
+    scene.fog = new THREE.Fog(0x9ed0ff, 28, LOW_GRAPHICS ? 62 : 85);
 
     const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 300);
 
@@ -1220,6 +1222,9 @@ const worldMaps = {
     let targetTimeOfDay = null;
     const DAY_NIGHT_SECONDS = 600;
     let localNameLabel = null; // (unused now, keeping var to avoid breaking references if expanded later)
+    let fpsFrames = 0;
+    let fpsTimer = 0;
+    let fpsValue = 0;
     let playerVisual = null;
     let usingGLBPlayer = false;
     let playerMixer = null;
@@ -1246,6 +1251,7 @@ const worldMaps = {
       nameError: document.getElementById('nameError'),
       coins: document.getElementById('coins'),
       mpStatus: document.getElementById('mpStatus'),
+      fpsStatus: document.getElementById('fpsStatus'),
       logs: document.getElementById('logs'),
       shrimp: document.getElementById('shrimp'),
       cookedShrimp: document.getElementById('cookedShrimp'),
@@ -1957,7 +1963,7 @@ const worldMaps = {
     }
 
     function addGround() {
-      const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 100, 100);
+      const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, LOW_GRAPHICS ? 36 : 100, LOW_GRAPHICS ? 36 : 100);
       groundGeo.rotateX(-Math.PI / 2);
       const pos = groundGeo.attributes.position;
       for (let i = 0; i < pos.count; i++) {
@@ -1989,7 +1995,7 @@ const worldMaps = {
       addFishingSpot(POND.x + 5.5, POND.z + 3.4, 'Shrimp Spot');
       addFishingSpot(POND.x - 3.8, POND.z - 5.8, 'Shrimp Spot');
 
-      for (let i = 0; i < 260; i++) {
+      for (let i = 0; i < (LOW_GRAPHICS ? 70 : 260); i++) {
         const tuft = new THREE.Group();
         const bladeCount = 5 + Math.floor(Math.random() * 8);
         const patchSize = .65 + Math.random() * 1.25;
@@ -2553,7 +2559,7 @@ const worldMaps = {
 
       let placed = 0;
       let attempts = 0;
-      while (placed < 34 && attempts < 260) {
+      while (placed < (LOW_GRAPHICS ? 16 : 34) && attempts < 260) {
         attempts++;
         const x = (Math.random() - .5) * (WORLD_SIZE - 18);
         const z = (Math.random() - .5) * (WORLD_SIZE - 18);
@@ -2768,8 +2774,8 @@ const worldMaps = {
           model.rotation.y = Math.PI;
           model.traverse(obj => {
             if (obj.isMesh) {
-              obj.castShadow = true;
-              obj.receiveShadow = true;
+              obj.castShadow = !LOW_GRAPHICS;
+              obj.receiveShadow = !LOW_GRAPHICS;
             }
           });
           player.add(model);
@@ -2855,8 +2861,8 @@ const worldMaps = {
           goblinModelTemplate = gltf.scene;
           goblinModelTemplate.traverse(obj => {
             if (obj.isMesh) {
-              obj.castShadow = true;
-              obj.receiveShadow = true;
+              obj.castShadow = !LOW_GRAPHICS;
+              obj.receiveShadow = !LOW_GRAPHICS;
             }
           });
           goblins.forEach(g => installGoblinVisual(g));
@@ -3275,6 +3281,24 @@ function addLights() {
       const isNight = timeOfDay > .55 || timeOfDay < .08;
       targetTimeOfDay = isNight ? .25 : .75;
       showNotice(isNight ? 'Developer toggle: transitioning to day.' : 'Developer toggle: transitioning to night.');
+    }
+
+    function toggleLowGraphics() {
+      const next = localStorage.getItem('bronzevaleLowGraphics') === '1' ? '0' : '1';
+      localStorage.setItem('bronzevaleLowGraphics', next);
+      showNotice(next === '1' ? 'Low graphics enabled. Refreshing...' : 'Low graphics disabled. Refreshing...');
+      setTimeout(() => location.reload(), 450);
+    }
+
+    function updateFpsCounter(dt) {
+      fpsFrames++;
+      fpsTimer += dt;
+      if (fpsTimer >= .5) {
+        fpsValue = Math.round(fpsFrames / fpsTimer);
+        fpsFrames = 0;
+        fpsTimer = 0;
+        ui.fpsStatus.textContent = `FPS: ${fpsValue}${LOW_GRAPHICS ? ' · Low' : ''}`;
+      }
     }
 
     function distance2D(a, b) {
@@ -5247,6 +5271,7 @@ addLights();
       if (e.code === 'KeyO') interact();
       if (e.code === 'Escape') { closeShop(); closeWorldMap(); ui.controlsPanel.classList.add('collapsed'); }
       if (e.code === 'KeyL') toggleDevDayNight();
+      if (e.code === 'KeyP') toggleLowGraphics();
       if (e.code === 'KeyX') setWeaponDrawn(!weaponDrawn);
     });
     addEventListener('keyup', e => {
@@ -5343,6 +5368,7 @@ addLights();
         levelBannerTimer -= dt;
         if (levelBannerTimer <= 0) ui.levelBanner.classList.remove('show', 'expanded');
       }
+      updateFpsCounter(dt);
       updateInput(dt);
       setPlayerGroundHeight();
       if (eatCooldown > 0) eatCooldown = Math.max(0, eatCooldown - dt);
