@@ -2857,23 +2857,35 @@ const worldMaps = {
       return map;
     }
 
+    function getTrackNodeAndProperty(trackName) {
+      const name = String(trackName || '');
+      const dot = name.lastIndexOf('.');
+      if (dot <= 0) return null;
+      return {
+        node: name.slice(0, dot),
+        property: name.slice(dot),
+      };
+    }
+
     function retargetClipToCurrentPlayer(clip) {
       if (!playerVisual || !clip?.tracks?.length) return clip;
       const targetMap = buildPlayerAnimTargetMap();
       const tracks = [];
       let renamed = 0;
+      let skipped = 0;
 
       for (const track of clip.tracks) {
-        const dot = track.name.indexOf('.');
-        if (dot <= 0) continue;
-        const sourceNode = track.name.slice(0, dot);
-        const property = track.name.slice(dot);
-        const targetNode = targetMap.get(cleanAnimNodeName(sourceNode));
-        if (!targetNode) continue;
+        const parsed = getTrackNodeAndProperty(track.name);
+        if (!parsed) { skipped++; continue; }
+
+        const rawNode = parsed.node.split('/').pop().split('|').pop();
+        const targetNode = targetMap.get(cleanAnimNodeName(rawNode)) || targetMap.get(cleanAnimNodeName(parsed.node));
+        if (!targetNode) { skipped++; continue; }
+
         const nextTrack = track.clone();
-        nextTrack.name = `${targetNode}${property}`;
+        nextTrack.name = `${targetNode}${parsed.property}`;
         tracks.push(nextTrack);
-        if (targetNode !== sourceNode) renamed++;
+        if (targetNode !== parsed.node) renamed++;
       }
 
       if (!tracks.length) {
@@ -2881,8 +2893,8 @@ const worldMaps = {
         return clip;
       }
 
-      console.info(`Retargeted animation ${clip.name || 'unnamed'}: ${tracks.length}/${clip.tracks.length} tracks used, ${renamed} renamed.`);
-      return new THREE.AnimationClip(clip.name || 'retargeted', clip.duration, tracks);
+      console.info(`Retargeted animation ${clip.name || 'unnamed'}: ${tracks.length}/${clip.tracks.length} tracks used, ${renamed} renamed, ${skipped} skipped.`);
+      return new THREE.AnimationClip(`${clip.name || 'retargeted'}_${Date.now()}`, clip.duration, tracks);
     }
 
     function registerPlayerAnimationClips(clips, source = 'unknown') {
@@ -2911,6 +2923,9 @@ const worldMaps = {
         const action = playerMixer.clipAction(usableClip, playerVisual);
         action.enabled = true;
         action.weight = 1;
+        action.timeScale = 1;
+        action.setEffectiveWeight(1);
+        action.setEffectiveTimeScale(1);
         action.setLoop(THREE.LoopRepeat);
         action.clampWhenFinished = false;
         playerActions[key] = action;
@@ -2940,10 +2955,15 @@ const worldMaps = {
       if (!playerMixer || !playerActions[name]) return;
       const next = playerActions[name];
       if (activePlayerAction === next) return;
-      next.reset().enabled = true;
+      next.reset();
+      next.enabled = true;
+      next.setEffectiveWeight(1);
+      next.setEffectiveTimeScale(1);
       next.play();
-      if (activePlayerAction) activePlayerAction.crossFadeTo(next, fade, false);
+      if (activePlayerAction && fade > 0) activePlayerAction.crossFadeTo(next, fade, false);
+      else if (activePlayerAction) activePlayerAction.stop();
       activePlayerAction = next;
+      console.info(`Player animation active: ${name}`);
     }
 
     function isPlayerMovingInput() {
