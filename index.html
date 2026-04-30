@@ -1228,10 +1228,17 @@ const worldMaps = {
     let playerVisual = null;
     let usingGLBPlayer = false;
     let playerMixer = null;
+    let playerActions = {};
+    let activePlayerAction = null;
+    let playerAnimationReady = false;
     let playerEquipmentLayer = null;
     let goblinModelTemplate = null;
     const glbRig = { player: null };
     const PLAYER_GLB_URL = './assets/player.glb';
+    const PLAYER_ANIMATION_URLS = {
+      idle: './assets/animations/idle.glb',
+      walk: './assets/animations/walk.glb',
+    };
     const GOBLIN_GLB_URL = './assets/goblin.glb';
     // Character convention: the player/goblin visuals are authored to face the same direction
     // as their parent object. Do not add a 180° correction here unless the exported GLB changes.
@@ -2808,11 +2815,14 @@ const worldMaps = {
           usingGLBPlayer = true;
           glbRig.player = collectNamedRigParts(model);
           player.userData.parts = {};
+          playerMixer = new THREE.AnimationMixer(model);
+          playerActions = {};
+          activePlayerAction = null;
+          playerAnimationReady = false;
           if (gltf.animations?.length) {
-            playerMixer = new THREE.AnimationMixer(model);
-            // Keep embedded clips available later, but do not auto-play one forever.
-            // The prototype currently drives named limb nodes from the live game actions.
+            registerPlayerAnimationClips(gltf.animations, 'embedded');
           }
+          loadExternalPlayerAnimations();
           playerEquipmentLayer.visible = true;
           showNotice('Loaded GLB player model.');
           addChatMessage({ system: true, text: 'Loaded GLB player model from assets/player.glb.' });
@@ -2823,6 +2833,58 @@ const worldMaps = {
           console.info('No player GLB found at assets/player.glb. Using built-in prototype character.');
         }
       );
+    }
+
+    function registerPlayerAnimationClips(clips, source = 'unknown') {
+      if (!playerMixer || !clips?.length) return;
+      clips.forEach((clip, index) => {
+        const rawName = String(clip.name || '').toLowerCase();
+        let key = rawName.includes('walk') || rawName.includes('run') ? 'walk'
+          : rawName.includes('idle') ? 'idle'
+          : source === 'walk' ? 'walk'
+          : source === 'idle' ? 'idle'
+          : index === 0 ? source
+          : `${source}_${index}`;
+        if (!key || playerActions[key]) return;
+        const action = playerMixer.clipAction(clip);
+        action.enabled = true;
+        action.setLoop(THREE.LoopRepeat);
+        action.clampWhenFinished = false;
+        playerActions[key] = action;
+        console.info(`Registered player animation: ${key} from ${source} (${clip.name || 'unnamed'})`);
+      });
+      playerAnimationReady = !!(playerActions.idle || playerActions.walk);
+      if (!activePlayerAction && playerActions.idle) setPlayerAnimation('idle', 0);
+    }
+
+    function loadExternalPlayerAnimations() {
+      const loader = new GLTFLoader();
+      Object.entries(PLAYER_ANIMATION_URLS).forEach(([key, url]) => {
+        loader.load(
+          url,
+          (gltf) => {
+            registerPlayerAnimationClips(gltf.animations || [], key);
+            if (playerActions.idle) setPlayerAnimation('idle', .12);
+            addChatMessage({ system: true, text: `Loaded ${key} animation from ${url}.` });
+          },
+          undefined,
+          () => console.info(`No ${key} animation found at ${url}.`)
+        );
+      });
+    }
+
+    function setPlayerAnimation(name, fade = .18) {
+      if (!playerMixer || !playerActions[name]) return;
+      const next = playerActions[name];
+      if (activePlayerAction === next) return;
+      next.reset().enabled = true;
+      next.play();
+      if (activePlayerAction) activePlayerAction.crossFadeTo(next, fade, false);
+      activePlayerAction = next;
+    }
+
+    function isPlayerMovingInput() {
+      return keys.has('KeyW') || keys.has('ArrowUp') || keys.has('KeyS') || keys.has('ArrowDown') || keys.has('KeyA') || keys.has('ArrowLeft') || keys.has('KeyD') || keys.has('ArrowRight');
     }
 
     function collectNamedRigParts(root) {
@@ -4594,8 +4656,18 @@ function addLights() {
     function updateGLBPlayerActions(dt) {
       if (!usingGLBPlayer || !playerVisual) return;
 
+      const moving = isPlayerMovingInput() && !shopOpen && !chopAction && !fishingAction && !cookingAction && attackCooldown <= 0;
+
+      if (playerAnimationReady) {
+        setPlayerAnimation(moving ? 'walk' : 'idle');
+        playerVisual.position.y = 0;
+        playerVisual.rotation.x = 0;
+        playerVisual.rotation.z = 0;
+        playerVisual.rotation.y = playerVisual.userData.baseRotationY || PLAYER_GLB_BASE_ROT_Y;
+        return;
+      }
+
       const rig = glbRig.player;
-      const moving = keys.has('KeyW') || keys.has('ArrowUp') || keys.has('KeyS') || keys.has('ArrowDown') || keys.has('KeyA') || keys.has('ArrowLeft') || keys.has('KeyD') || keys.has('ArrowRight');
       const t = clock.elapsedTime;
       const stride = Math.sin(t * 8.5);
       resetGlbRigPose(rig);
@@ -4617,7 +4689,6 @@ function addLights() {
 
       if (attackCooldown > 0) {
         const phase = Math.sin((1 - attackCooldown / .62) * Math.PI);
-        // GLB action signs: positive X moves the named limb forward on this model.
         addBoneRotation(rig?.armR, 1.05 * phase, 0, 0);
         addBoneRotation(rig?.forearmR, .35 * phase, 0, 0);
         addBoneRotation(rig?.armL, .18 * phase, 0, 0);
