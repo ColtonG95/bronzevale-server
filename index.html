@@ -1233,6 +1233,10 @@ const worldMaps = {
     const glbRig = { player: null };
     const PLAYER_GLB_URL = './assets/player.glb';
     const GOBLIN_GLB_URL = './assets/goblin.glb';
+    // Character convention: the prototype character's face/front points down local -Z.
+    // The parent rotation points that -Z front toward movement/action targets.
+    const CHARACTER_FRONT_ROT_OFFSET = Math.PI;
+    const PLAYER_GLB_BASE_ROT_Y = Math.PI;
     const WORLD_SIZE = 180;
     const WORLD_HALF = WORLD_SIZE / 2;
     const terrainColliders = [];
@@ -2771,7 +2775,8 @@ const worldMaps = {
           model.name = 'GLBPlayerVisual';
           model.scale.set(1.15, 1.15, 1.15);
           model.position.set(0, 0, 0);
-          model.rotation.y = Math.PI;
+          model.rotation.y = PLAYER_GLB_BASE_ROT_Y;
+          model.userData.baseRotationY = PLAYER_GLB_BASE_ROT_Y;
           model.traverse(obj => {
             if (obj.isMesh) {
               obj.castShadow = !LOW_GRAPHICS;
@@ -3661,7 +3666,7 @@ function addLights() {
           const dx = gob.position.x - oldX;
           const dz = gob.position.z - oldZ;
           const moving = Math.hypot(dx, dz) > .01;
-          if (moving) gob.rotation.y = Math.atan2(dx, dz) + Math.PI;
+          if (moving) gob.rotation.y = Math.atan2(dx, dz) + CHARACTER_FRONT_ROT_OFFSET;
           animateGoblinVisual(gob, .05, moving, false);
         }
       }
@@ -3695,7 +3700,7 @@ function addLights() {
       chopAction = null;
       fishingAction = null;
       weaponDrawn = false;
-      player.rotation.y = Math.atan2(targetStove.position.x - player.position.x, targetStove.position.z - player.position.z) + Math.PI;
+      player.rotation.y = Math.atan2(targetStove.position.x - player.position.x, targetStove.position.z - player.position.z) + CHARACTER_FRONT_ROT_OFFSET;
       cookingAction = {
         stove: targetStove,
         time: 0,
@@ -3870,7 +3875,7 @@ function addLights() {
         time: 0,
         duration: spot.actionDuration,
       };
-      player.rotation.y = Math.atan2(targetFishingSpot.position.x - player.position.x, targetFishingSpot.position.z - player.position.z) + Math.PI;
+      player.rotation.y = Math.atan2(targetFishingSpot.position.x - player.position.x, targetFishingSpot.position.z - player.position.z) + CHARACTER_FRONT_ROT_OFFSET;
       showNotice(`You cast your line into the water.`);
     }
 
@@ -3921,7 +3926,7 @@ function addLights() {
       chopAction = { tree: targetTree, time: 0, duration: data.chopDuration };
       weaponDrawn = false;
       hatchetSwing = .6;
-      player.rotation.y = Math.atan2(targetTree.position.x - player.position.x, targetTree.position.z - player.position.z) + Math.PI;
+      player.rotation.y = Math.atan2(targetTree.position.x - player.position.x, targetTree.position.z - player.position.z) + CHARACTER_FRONT_ROT_OFFSET;
       showNotice(`You swing your bronze hatchet at the ${data.name.toLowerCase()}.`);
     }
 
@@ -4048,7 +4053,7 @@ function addLights() {
         const right = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
         const dir = new THREE.Vector3().addScaledVector(right, moveX).addScaledVector(forward, moveZ);
         tryMove(player, dir.x * dt * 6.0, dir.z * dt * 6.0);
-        player.rotation.y = Math.atan2(dir.x, dir.z) + Math.PI;
+        player.rotation.y = Math.atan2(dir.x, dir.z) + CHARACTER_FRONT_ROT_OFFSET;
       }
     }
 
@@ -4076,6 +4081,8 @@ function addLights() {
         if (moving) {
           if (rig.legL) rig.legL.rotation.x = phase * .55;
           if (rig.legR) rig.legR.rotation.x = -phase * .55;
+          if (rig.shinL) rig.shinL.rotation.x = Math.max(0, phase) * .35;
+          if (rig.shinR) rig.shinR.rotation.x = Math.max(0, -phase) * .35;
           if (rig.armL) rig.armL.rotation.x = -phase * .45;
           if (rig.armR) rig.armR.rotation.x = phase * .45;
         }
@@ -4129,7 +4136,7 @@ function addLights() {
           const dz = (player.position.z - g.position.z) / d;
           g.position.x += dx * dt * 2.1;
           g.position.z += dz * dt * 2.1;
-          g.rotation.y = Math.atan2(dx, dz) + Math.PI;
+          g.rotation.y = Math.atan2(dx, dz) + CHARACTER_FRONT_ROT_OFFSET;
         } else {
           data.wander += dt * (.5 + Math.random() * .08);
           const homeD = Math.hypot(g.position.x - data.home.x, g.position.z - data.home.z);
@@ -4251,7 +4258,7 @@ function addLights() {
         return;
       }
       cookingAction.time += dt;
-      player.rotation.y = Math.atan2(stove.position.x - player.position.x, stove.position.z - player.position.z) + Math.PI;
+      player.rotation.y = Math.atan2(stove.position.x - player.position.x, stove.position.z - player.position.z) + CHARACTER_FRONT_ROT_OFFSET;
       if (cookingAction.time >= cookingAction.duration) finishCooking();
     }
 
@@ -4283,7 +4290,7 @@ function addLights() {
           return;
         }
         fishingAction.time += dt;
-        player.rotation.y = Math.atan2(spot.position.x - player.position.x, spot.position.z - player.position.z) + Math.PI;
+        player.rotation.y = Math.atan2(spot.position.x - player.position.x, spot.position.z - player.position.z) + CHARACTER_FRONT_ROT_OFFSET;
         if (fishingAction.time >= fishingAction.duration) finishFishing();
       }
     }
@@ -4324,7 +4331,7 @@ function addLights() {
         }
         chopAction.time += dt;
         hatchetSwing = Math.max(hatchetSwing, .3);
-        player.rotation.y = Math.atan2(tree.position.x - player.position.x, tree.position.z - player.position.z) + Math.PI;
+        player.rotation.y = Math.atan2(tree.position.x - player.position.x, tree.position.z - player.position.z) + CHARACTER_FRONT_ROT_OFFSET;
         if (chopAction.time >= chopAction.duration) finishChop(tree);
       }
     }
@@ -4419,12 +4426,12 @@ function addLights() {
             const stride = Math.sin(t);
             const counter = Math.sin(t + Math.PI);
             parts.hips.position.y = 1.62 + Math.abs(stride) * .06;
-            parts.legL.rotation.x = -stride * .5;
-            parts.legR.rotation.x = -counter * .5;
+            parts.legL.rotation.x = stride * .5;
+            parts.legR.rotation.x = counter * .5;
             parts.kneeL.rotation.x = Math.max(0, stride) * .55;
             parts.kneeR.rotation.x = Math.max(0, counter) * .55;
-            parts.armL.rotation.x = -counter * .4;
-            parts.armR.rotation.x = -stride * .4;
+            parts.armL.rotation.x = -stride * .4;
+            parts.armR.rotation.x = -counter * .4;
           }
         }
       }
@@ -4477,14 +4484,14 @@ function addLights() {
       p.spine.rotation.z = Math.sin(t) * .028;
       p.head.rotation.x = .03 - Math.abs(stride) * .018;
 
-      // This prototype rig faces local -Z. These signs put the knee bend under the forward-stepping leg.
-      p.legL.rotation.x = -stride * .62;
-      p.legR.rotation.x = -counter * .62;
+      // This prototype rig faces local -Z. Positive leg X rotation steps forward toward local -Z.
+      p.legL.rotation.x = stride * .62;
+      p.legR.rotation.x = counter * .62;
       p.kneeL.rotation.x = Math.max(0, stride) * .72;
       p.kneeR.rotation.x = Math.max(0, counter) * .72;
 
-      p.armL.rotation.x = -counter * .48;
-      p.armR.rotation.x = -stride * .48;
+      p.armL.rotation.x = -stride * .48;
+      p.armR.rotation.x = -counter * .48;
       p.armL.rotation.z = .18;
       p.armR.rotation.z = -.18;
       p.forearmL.rotation.x = -.14 + Math.max(0, -stride) * .18;
@@ -4528,15 +4535,15 @@ function addLights() {
       playerVisual.position.y = moving ? Math.abs(stride) * .045 : Math.sin(t * 2.2) * .012;
       playerVisual.rotation.x = 0;
       playerVisual.rotation.z = 0;
-      playerVisual.rotation.y = 0;
+      playerVisual.rotation.y = playerVisual.userData.baseRotationY || PLAYER_GLB_BASE_ROT_Y;
 
       if (moving && rig) {
-        if (rig.legL) rig.legL.rotation.x = -stride * .58;
-        if (rig.legR) rig.legR.rotation.x = stride * .58;
+        if (rig.legL) rig.legL.rotation.x = stride * .58;
+        if (rig.legR) rig.legR.rotation.x = -stride * .58;
         if (rig.shinL) rig.shinL.rotation.x = Math.max(0, stride) * .45;
         if (rig.shinR) rig.shinR.rotation.x = Math.max(0, -stride) * .45;
-        if (rig.armL) rig.armL.rotation.x = stride * .45;
-        if (rig.armR) rig.armR.rotation.x = -stride * .45;
+        if (rig.armL) rig.armL.rotation.x = -stride * .45;
+        if (rig.armR) rig.armR.rotation.x = stride * .45;
         if (rig.torso) rig.torso.rotation.z = stride * .025;
       }
 
@@ -5099,7 +5106,7 @@ function addLights() {
       if (distToPlayer < 26) {
         const dx = player.position.x - dungeonBoss.position.x;
         const dz = player.position.z - dungeonBoss.position.z;
-        dungeonBoss.rotation.y = Math.atan2(dx, dz) + Math.PI;
+        dungeonBoss.rotation.y = Math.atan2(dx, dz) + CHARACTER_FRONT_ROT_OFFSET;
       }
       if (data.legFL) data.legFL.rotation.x = idle * .18 + attack * .32;
       if (data.legFR) data.legFR.rotation.x = -idle * .18 + attack * .32;
