@@ -2852,7 +2852,9 @@ const worldMaps = {
       playerVisual.traverse(obj => {
         if (!obj.name) return;
         const clean = cleanAnimNodeName(obj.name);
-        if (clean && !map.has(clean)) map.set(clean, obj.name);
+        // Use UUID instead of name so AnimationMixer binds to the exact live bone object,
+        // avoiding duplicate names or special characters from Blender/Mixamo exports.
+        if (clean && !map.has(clean)) map.set(clean, obj.uuid);
       });
       return map;
     }
@@ -2879,18 +2881,18 @@ const worldMaps = {
         if (!parsed) { skipped++; continue; }
 
         const rawNode = parsed.node.split('/').pop().split('|').pop();
-        const targetNode = targetMap.get(cleanAnimNodeName(rawNode)) || targetMap.get(cleanAnimNodeName(parsed.node));
-        if (!targetNode) { skipped++; continue; }
+        const targetUuid = targetMap.get(cleanAnimNodeName(rawNode)) || targetMap.get(cleanAnimNodeName(parsed.node));
+        if (!targetUuid) { skipped++; continue; }
 
         const nextTrack = track.clone();
-        nextTrack.name = `${targetNode}${parsed.property}`;
+        nextTrack.name = `${targetUuid}${parsed.property}`;
         tracks.push(nextTrack);
-        if (targetNode !== parsed.node) renamed++;
+        if (targetUuid !== parsed.node) renamed++;
       }
 
       if (!tracks.length) {
         console.warn(`Loaded animation ${clip.name || 'unnamed'}, but 0 tracks matched player.glb bones. This usually means the animation GLB was exported from a different rig.`);
-        return clip;
+        return null;
       }
 
       console.info(`Retargeted animation ${clip.name || 'unnamed'}: ${tracks.length}/${clip.tracks.length} tracks used, ${renamed} renamed, ${skipped} skipped.`);
@@ -2920,6 +2922,7 @@ const worldMaps = {
         }
 
         const usableClip = retargetClipToCurrentPlayer(clip);
+        if (!usableClip) return;
         const action = playerMixer.clipAction(usableClip, playerVisual);
         action.enabled = true;
         action.weight = 1;
