@@ -2835,8 +2835,61 @@ const worldMaps = {
       );
     }
 
+    function cleanAnimNodeName(name) {
+      return String(name || '')
+        .split('.')[0]
+        .split('/').pop()
+        .split('|').pop()
+        .replace(/^mixamorig/i, '')
+        .replace(/^armature/i, '')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toLowerCase();
+    }
+
+    function buildPlayerAnimTargetMap() {
+      const map = new Map();
+      if (!playerVisual) return map;
+      playerVisual.traverse(obj => {
+        if (!obj.name) return;
+        const clean = cleanAnimNodeName(obj.name);
+        if (clean && !map.has(clean)) map.set(clean, obj.name);
+      });
+      return map;
+    }
+
+    function retargetClipToCurrentPlayer(clip) {
+      if (!playerVisual || !clip?.tracks?.length) return clip;
+      const targetMap = buildPlayerAnimTargetMap();
+      const tracks = [];
+      let renamed = 0;
+
+      for (const track of clip.tracks) {
+        const dot = track.name.indexOf('.');
+        if (dot <= 0) continue;
+        const sourceNode = track.name.slice(0, dot);
+        const property = track.name.slice(dot);
+        const targetNode = targetMap.get(cleanAnimNodeName(sourceNode));
+        if (!targetNode) continue;
+        const nextTrack = track.clone();
+        nextTrack.name = `${targetNode}${property}`;
+        tracks.push(nextTrack);
+        if (targetNode !== sourceNode) renamed++;
+      }
+
+      if (!tracks.length) {
+        console.warn(`Loaded animation ${clip.name || 'unnamed'}, but 0 tracks matched player.glb bones. This usually means the animation GLB was exported from a different rig.`);
+        return clip;
+      }
+
+      console.info(`Retargeted animation ${clip.name || 'unnamed'}: ${tracks.length}/${clip.tracks.length} tracks used, ${renamed} renamed.`);
+      return new THREE.AnimationClip(clip.name || 'retargeted', clip.duration, tracks);
+    }
+
     function registerPlayerAnimationClips(clips, source = 'unknown') {
-      if (!playerMixer || !clips?.length) return;
+      if (!playerMixer || !clips?.length) {
+        console.warn(`No animation clips found for ${source}.`);
+        return;
+      }
       clips.forEach((clip, index) => {
         const rawName = String(clip.name || '').toLowerCase();
         let key = rawName.includes('walk') || rawName.includes('run') ? 'walk'
@@ -2845,16 +2898,26 @@ const worldMaps = {
           : source === 'idle' ? 'idle'
           : index === 0 ? source
           : `${source}_${index}`;
-        if (!key || playerActions[key]) return;
-        const action = playerMixer.clipAction(clip);
+        if (!key) return;
+
+        if (playerActions[key]) {
+          const oldAction = playerActions[key];
+          oldAction.stop();
+          if (activePlayerAction === oldAction) activePlayerAction = null;
+          delete playerActions[key];
+        }
+
+        const usableClip = retargetClipToCurrentPlayer(clip);
+        const action = playerMixer.clipAction(usableClip, playerVisual);
         action.enabled = true;
+        action.weight = 1;
         action.setLoop(THREE.LoopRepeat);
         action.clampWhenFinished = false;
         playerActions[key] = action;
-        console.info(`Registered player animation: ${key} from ${source} (${clip.name || 'unnamed'})`);
+        console.info(`Registered player animation: ${key} from ${source} (${clip.name || 'unnamed'}, ${usableClip.tracks.length} tracks)`);
       });
       playerAnimationReady = !!(playerActions.idle || playerActions.walk);
-      if (!activePlayerAction && playerActions.idle) setPlayerAnimation('idle', 0);
+      if (playerActions.idle) setPlayerAnimation('idle', 0);
     }
 
     function loadExternalPlayerAnimations() {
