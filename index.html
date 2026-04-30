@@ -2826,30 +2826,79 @@ const worldMaps = {
     }
 
     function collectNamedRigParts(root) {
-      const rig = {};
+      const rig = { bones: [] };
+
+      function hasAny(name, terms) {
+        return terms.some(term => name.includes(term));
+      }
+
       root.traverse(obj => {
         if (!obj.name) return;
-        const key = obj.name.toLowerCase();
-        if (key.includes('head')) rig.head = obj;
-        if (key.includes('torso') || key.includes('chest')) rig.torso = obj;
-        if (key.includes('hip') || key.includes('pelvis')) rig.hips = obj;
-        if (key.includes('upperarm_l') || key.includes('arm_left')) rig.armL = obj;
-        if (key.includes('upperarm_r') || key.includes('arm_right')) rig.armR = obj;
-        if (key.includes('forearm_l')) rig.forearmL = obj;
-        if (key.includes('forearm_r')) rig.forearmR = obj;
-        if (key.includes('thigh_l') || key.includes('leg_left')) rig.legL = obj;
-        if (key.includes('thigh_r') || key.includes('leg_right')) rig.legR = obj;
-        if (key.includes('shin_l')) rig.shinL = obj;
-        if (key.includes('shin_r')) rig.shinR = obj;
+        const key = obj.name.toLowerCase().replace(/[\s._-]/g, '');
+        const isBoneLike = obj.isBone || obj.type === 'Bone' || key.includes('mixamorig') || key.includes('armature');
+        if (!isBoneLike && !obj.rotation) return;
+
+        if (obj.rotation && !obj.userData.baseRotation) {
+          obj.userData.baseRotation = obj.rotation.clone();
+        }
+        if (obj.rotation) rig.bones.push(obj);
+
+        if (hasAny(key, ['head'])) rig.head = obj;
+        if (hasAny(key, ['neck'])) rig.neck = obj;
+        if (hasAny(key, ['spine2', 'spine02', 'chest', 'upperchest'])) rig.torso = rig.torso || obj;
+        if (hasAny(key, ['spine', 'torso']) && !hasAny(key, ['spine1', 'spine01', 'spine2', 'spine02'])) rig.spine = rig.spine || obj;
+        if (hasAny(key, ['hips', 'pelvis'])) rig.hips = obj;
+
+        const isLeft = key.includes('left') || key.includes('larm') || key.includes('lforearm') || key.includes('lhand') || key.includes('lleg') || key.includes('lthigh') || key.includes('lshin') || key.endsWith('l');
+        const isRight = key.includes('right') || key.includes('rarm') || key.includes('rforearm') || key.includes('rhand') || key.includes('rleg') || key.includes('rthigh') || key.includes('rshin') || key.endsWith('r');
+
+        if (isLeft && hasAny(key, ['upperarm', 'arm']) && !hasAny(key, ['forearm', 'lowerarm', 'hand'])) rig.armL = rig.armL || obj;
+        if (isRight && hasAny(key, ['upperarm', 'arm']) && !hasAny(key, ['forearm', 'lowerarm', 'hand'])) rig.armR = rig.armR || obj;
+        if (isLeft && hasAny(key, ['forearm', 'lowerarm'])) rig.forearmL = rig.forearmL || obj;
+        if (isRight && hasAny(key, ['forearm', 'lowerarm'])) rig.forearmR = rig.forearmR || obj;
+        if (isLeft && hasAny(key, ['hand'])) rig.handL = rig.handL || obj;
+        if (isRight && hasAny(key, ['hand'])) rig.handR = rig.handR || obj;
+
+        if (isLeft && hasAny(key, ['upleg', 'thigh', 'leg']) && !hasAny(key, ['shin', 'calf', 'foot', 'toe'])) rig.legL = rig.legL || obj;
+        if (isRight && hasAny(key, ['upleg', 'thigh', 'leg']) && !hasAny(key, ['shin', 'calf', 'foot', 'toe'])) rig.legR = rig.legR || obj;
+        if (isLeft && hasAny(key, ['shin', 'calf']) && !hasAny(key, ['upleg', 'thigh', 'foot', 'toe'])) rig.shinL = rig.shinL || obj;
+        if (isRight && hasAny(key, ['shin', 'calf']) && !hasAny(key, ['upleg', 'thigh', 'foot', 'toe'])) rig.shinR = rig.shinR || obj;
+        if (isLeft && hasAny(key, ['foot'])) rig.footL = rig.footL || obj;
+        if (isRight && hasAny(key, ['foot'])) rig.footR = rig.footR || obj;
+      });
+
+      console.info('Collected GLB rig parts:', {
+        bones: rig.bones.length,
+        head: !!rig.head,
+        torso: !!rig.torso,
+        hips: !!rig.hips,
+        armL: !!rig.armL,
+        armR: !!rig.armR,
+        forearmL: !!rig.forearmL,
+        forearmR: !!rig.forearmR,
+        legL: !!rig.legL,
+        legR: !!rig.legR,
+        shinL: !!rig.shinL,
+        shinR: !!rig.shinR,
       });
       return rig;
     }
 
     function resetGlbRigPose(rig) {
-      if (!rig) return;
-      Object.values(rig).forEach(part => {
-        if (part?.rotation) part.rotation.set(0, 0, 0);
+      if (!rig?.bones) return;
+      rig.bones.forEach(part => {
+        if (part?.rotation && part.userData.baseRotation) {
+          part.rotation.copy(part.userData.baseRotation);
+        }
       });
+    }
+
+    function addBoneRotation(part, x = 0, y = 0, z = 0) {
+      if (!part?.rotation) return;
+      const base = part.userData.baseRotation;
+      if (base) part.rotation.set(base.x + x, base.y + y, base.z + z);
+      else part.rotation.set(part.rotation.x + x, part.rotation.y + y, part.rotation.z + z);
+    });
     }
 
     function installGoblinVisual(gob) {
@@ -4558,37 +4607,37 @@ function addLights() {
       playerVisual.rotation.y = playerVisual.userData.baseRotationY || PLAYER_GLB_BASE_ROT_Y;
 
       if (moving && rig) {
-        if (rig.legL) rig.legL.rotation.x = -stride * .58;
-        if (rig.legR) rig.legR.rotation.x = stride * .58;
-        if (rig.shinL) rig.shinL.rotation.x = Math.max(0, stride) * .45;
-        if (rig.shinR) rig.shinR.rotation.x = Math.max(0, -stride) * .45;
-        if (rig.armL) rig.armL.rotation.x = stride * .45;
-        if (rig.armR) rig.armR.rotation.x = -stride * .45;
-        if (rig.torso) rig.torso.rotation.z = stride * .025;
+        addBoneRotation(rig.legL, -stride * .58, 0, 0);
+        addBoneRotation(rig.legR, stride * .58, 0, 0);
+        addBoneRotation(rig.shinL, Math.max(0, stride) * .45, 0, 0);
+        addBoneRotation(rig.shinR, Math.max(0, -stride) * .45, 0, 0);
+        addBoneRotation(rig.armL, stride * .45, 0, 0);
+        addBoneRotation(rig.armR, -stride * .45, 0, 0);
+        addBoneRotation(rig.torso || rig.spine, 0, 0, stride * .025);
       }
 
       if (attackCooldown > 0) {
         const phase = Math.sin((1 - attackCooldown / .62) * Math.PI);
         // GLB action signs: positive X moves the named limb forward on this model.
-        if (rig?.armR) rig.armR.rotation.x = 1.05 * phase;
-        if (rig?.forearmR) rig.forearmR.rotation.x = .35 * phase;
-        if (rig?.armL) rig.armL.rotation.x = .18 * phase;
-        if (rig?.torso) rig.torso.rotation.z = -phase * .1;
+        addBoneRotation(rig?.armR, 1.05 * phase, 0, 0);
+        addBoneRotation(rig?.forearmR, .35 * phase, 0, 0);
+        addBoneRotation(rig?.armL, .18 * phase, 0, 0);
+        addBoneRotation(rig?.torso || rig?.spine, 0, 0, -phase * .1);
         playerVisual.rotation.z = -phase * .035;
       } else if (chopAction) {
         const phase = Math.max(0, Math.sin(chopAction.time * 12));
         const lift = 1 - phase;
-        if (rig?.armR) rig.armR.rotation.x = .85 + phase * .75;
-        if (rig?.armL) rig.armL.rotation.x = .62 + phase * .48;
-        if (rig?.forearmR) rig.forearmR.rotation.x = .22 + phase * .35;
-        if (rig?.forearmL) rig.forearmL.rotation.x = .18 + phase * .28;
-        if (rig?.torso) rig.torso.rotation.x = phase * .06 - lift * .025;
+        addBoneRotation(rig?.armR, .85 + phase * .75, 0, 0);
+        addBoneRotation(rig?.armL, .62 + phase * .48, 0, 0);
+        addBoneRotation(rig?.forearmR, .22 + phase * .35, 0, 0);
+        addBoneRotation(rig?.forearmL, .18 + phase * .28, 0, 0);
+        addBoneRotation(rig?.torso || rig?.spine, phase * .06 - lift * .025, 0, 0);
       } else if (fishingAction) {
         const phase = Math.sin(fishingAction.time * 4.2);
-        if (rig?.armR) rig.armR.rotation.x = .68 + phase * .05;
-        if (rig?.forearmR) rig.forearmR.rotation.x = .22;
-        if (rig?.armL) rig.armL.rotation.x = .28;
-        if (rig?.torso) rig.torso.rotation.x = .025 + phase * .012;
+        addBoneRotation(rig?.armR, .68 + phase * .05, 0, 0);
+        addBoneRotation(rig?.forearmR, .22, 0, 0);
+        addBoneRotation(rig?.armL, .28, 0, 0);
+        addBoneRotation(rig?.torso || rig?.spine, .025 + phase * .012, 0, 0);
       }
     }
 
